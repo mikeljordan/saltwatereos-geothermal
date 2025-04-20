@@ -2,7 +2,10 @@
 #include "H2ONaCl_LUT_RefineFuncI.H"
 #include "LookUpTableForestI.H"
 #include "interpolationI.H"
+#include <cmath>
+#include <fstream>
 // using namespace H2ONaCl;
+// TODO: Make systematic conversion of S_l, S_v, and S_h to 0.0 when they are Nan! So can be parsed accordingly
 namespace H2ONaCl
 {
     cH2ONaCl::cH2ONaCl()
@@ -241,6 +244,7 @@ namespace H2ONaCl
         }
         if((T2 > 1000 || h1 > H) || (h2 < H && T2 == 1000  && p >= 1.7e7) )
         {
+            // Changed everything from NAN to 0.0 for saturations
             prop.Region=UnknownPhaseRegion;
             prop.Rho=NAN;
             prop.Rho_l=NAN;
@@ -250,9 +254,9 @@ namespace H2ONaCl
             prop.H_l=NAN;
             prop.H_v=NAN;
             prop.H_h=NAN;
-            prop.S_l=NAN;
-            prop.S_v=NAN;
-            prop.S_h=NAN;
+            prop.S_l=0.0;
+            prop.S_v=0.0;
+            prop.S_h=0.0;
             prop.Mu=NAN;
             prop.Mu_l=NAN;
             prop.X_l=NAN;
@@ -685,16 +689,17 @@ namespace H2ONaCl
         prop.H = (prop.S_l*prop.Rho_l*prop.H_l + prop.S_v*prop.Rho_v*prop.H_v + prop.S_h * prop.Rho_h * prop.H_h)/prop.Rho;
         // printf("prop_pTX: Rho=%.2f, Rho_l=%.2f, Rho_v=%.2f, Rho_h=%.2f\n",prop.Rho,prop.Rho_l, prop.Rho_v, prop.Rho_h);
         // printf("prop_pTX: S_l=%.2f, S_v=%.2f, S_h=%.2f\n",prop.S_l, prop.S_v, prop.S_h);
-        // v+l+h-region: //TODO: why ????
-        if(prop.Region==ThreePhase_V_L_H) prop.S_l= NAN; 
-        if(prop.Region==ThreePhase_V_L_H) prop.S_v= NAN; 
-        if(prop.Region==ThreePhase_V_L_H) prop.S_h= NAN; 
+        
+        // v+l+h-region: //TODO: why ???? Changed everything to from NAN to 0.0
+        if(prop.Region==ThreePhase_V_L_H) prop.S_l= 0.0; 
+        if(prop.Region==ThreePhase_V_L_H) prop.S_v= 0.0; 
+        if(prop.Region==ThreePhase_V_L_H) prop.S_h= 0.0; 
         if(prop.Region==ThreePhase_V_L_H) prop.Rho= NAN; 
         if(prop.Region==ThreePhase_V_L_H) prop.H= NAN; 
         // v+l-region X = 0;
-        if(prop.Region==TwoPhase_L_V_X0) prop.S_l= NAN; 
-        if(prop.Region==TwoPhase_L_V_X0) prop.S_v= NAN; 
-        if(prop.Region==TwoPhase_L_V_X0) prop.S_h= 0; 
+        if(prop.Region==TwoPhase_L_V_X0) prop.S_l= 0.0; 
+        if(prop.Region==TwoPhase_L_V_X0) prop.S_v= 0.0; 
+        if(prop.Region==TwoPhase_L_V_X0) prop.S_h= 0.0; 
         if(prop.Region==TwoPhase_L_V_X0) prop.Rho = NAN; 
         if(prop.Region==TwoPhase_L_V_X0) prop.H= NAN; 
         
@@ -1998,7 +2003,18 @@ namespace H2ONaCl
         }
         fpout.close();
     }
-    void cH2ONaCl:: writeProps2VTK(std::vector<double> x, std::vector<double> y, std::vector<double> z, std::vector<H2ONaCl::PROP_H2ONaCl> props, std::string fname, bool isNormalize, std::string xTitle, std::string yTitle, std::string zTitle)
+
+    void cH2ONaCl:: writeProps2VTK(
+        std::vector<double> x, 
+        std::vector<double> y, 
+        std::vector<double> z, 
+        std::vector<H2ONaCl::PROP_H2ONaCl> props, 
+        std::string fname, 
+        bool isNormalize, 
+        std::string xTitle, 
+        std::string yTitle, 
+        std::string zTitle
+    )
     {
         cout<<"Writing results to file ..."<<endl;
         if((x.size()*y.size()*z.size())!=props.size())
@@ -2098,6 +2114,10 @@ namespace H2ONaCl
         }
         fpout<<"POINT_DATA "<<props.size()<<endl;
         // 1. phase region
+        const double ent_eps_tol = 1.0e-7;
+        const double vis_eps_tol = 1.0e-7;
+        // Consider non-zero unphysical phase density.
+        const double mini_density = 0.0; //0.001
         fpout<<"SCALARS PhaseRegion int"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
@@ -2109,7 +2129,8 @@ namespace H2ONaCl
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].T<<" ";
+            // Convert temperature to Kelvin
+            fpout<<(props[i].T + 273.15)<<" ";
         }fpout<<endl;
         // 2. bulk Rho 
         fpout<<"SCALARS Rho double"<<endl;
@@ -2123,6 +2144,19 @@ namespace H2ONaCl
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
+            double H_l = isnan(props[i].H_l) ? ent_eps_tol : props[i].H_l;
+            double H_v = isnan(props[i].H_v) ? ent_eps_tol : props[i].H_v;
+            double Rho_l = isnan(props[i].Rho_l) ? mini_density : props[i].Rho_l;
+            double Rho_v = isnan(props[i].Rho_v) ? mini_density : props[i].Rho_v;
+            double total_density = props[i].S_v * Rho_v + props[i].S_l * Rho_l;
+            // Ensure total density is valid to avoid division by zero
+            if (total_density > 0.0 && !isnan(total_density)) {
+                // Recompute total enthalpy using the weighted average approach
+                props[i].H = (props[i].S_v * Rho_v * H_v + props[i].S_l * Rho_l * H_l) / total_density;
+            } else {
+                // Handle case with no valid phase data
+                props[i].H = 0.0;  // Assign default or error value
+            }
             fpout<<props[i].H<<" ";
         }fpout<<endl;
         // 2. Xl 
@@ -2144,49 +2178,86 @@ namespace H2ONaCl
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].Rho_l<<" ";
+            double den_l = std::max(props[i].Rho_l, mini_density);
+            fpout<<den_l<<" ";
         }fpout<<endl;
         // 4. Rho_v
         fpout<<"SCALARS Rho_v double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].Rho_v<<" ";
+            double den_v = std::max(props[i].Rho_v, mini_density);
+            fpout<<den_v<<" ";
         }fpout<<endl;
         // 5. Rho_h
         fpout<<"SCALARS Rho_h double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].Rho_h<<" ";
+            double den_h = std::max(props[i].Rho_h, mini_density);
+            fpout<<den_h<<" ";
         }fpout<<endl;
         // 6. H_l
         fpout<<"SCALARS H_l double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].H_l<<" ";
+            if (fabs(props[i].S_l) < ent_eps_tol || isnan(props[i].H_l))
+            {
+                fpout<<props[i].H<<" ";
+            }
+            else
+            {
+                fpout<<props[i].H_l<<" ";
+            }
         }fpout<<endl;
         // 7. H_v
         fpout<<"SCALARS H_v double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].H_v<<" ";
+            if (fabs(props[i].S_v) < ent_eps_tol || isnan(props[i].H_v))
+            {
+                fpout<<props[i].H<<" ";
+                // fpout<<(0.0)<<" ";
+            }
+            else
+            {
+                fpout<<props[i].H_v<<" ";
+            }
         }fpout<<endl;
         // 8. H_h
         fpout<<"SCALARS H_h double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
-            fpout<<props[i].H_h<<" ";
+            if (fabs(props[i].S_h) < ent_eps_tol or isnan(props[i].H_h))
+            {
+                fpout<<props[i].H<<" ";
+            }
+            else
+            {
+                fpout<<props[i].H_h<<" ";
+            }
         }fpout<<endl;
+        // const double mini_viscosity = 0.0;
         // liquid viscosity
         fpout<<"SCALARS mu_l double"<<endl;
         fpout<<"LOOKUP_TABLE default"<<endl;
         for(int i=0;i<props.size();i++)
         {
             fpout<<props[i].Mu_l<<" ";
+            // if(fabs(props[i].S_l) < vis_eps_tol || isnan(props[i].Mu_l) || props[i].Mu_l==0.0 )
+            // {
+            //     fpout<<mini_viscosity<<" ";
+            // }
+            // else
+            // {
+            //     fpout<<props[i].Mu_l<<" ";
+            // }
+            // Ensure viscosity is at least min_viscosity
+            // double vis_l = std::max(props[i].Mu_l, mini_viscosity);
+            // fpout<<vis_l<<" ";
         }fpout<<endl;
         // vapour viscosity
         fpout<<"SCALARS mu_v double"<<endl;
@@ -2194,9 +2265,42 @@ namespace H2ONaCl
         for(int i=0;i<props.size();i++)
         {
             fpout<<props[i].Mu_v<<" ";
+            // if(fabs(props[i].S_v) < vis_eps_tol || isnan(props[i].Mu_v) || props[i].Mu_v==0.0 )
+            // {
+            //     fpout<<(mini_viscosity)<<" ";
+            // }
+            // else
+            // {
+            //     fpout<<props[i].Mu_v<<" ";
+            // }
+            // // Ensure viscosity is at least min_viscosity
+            // double vis_v = std::max(props[i].Mu_v, mini_viscosity);
+            // fpout<<vis_v<<" ";
+        }fpout<<endl;
+        // New: Liquid Saturation (S_l)
+        fpout << "SCALARS S_l double" << endl;
+        fpout << "LOOKUP_TABLE default" << endl;
+        for (int i = 0; i < props.size(); i++) 
+        {
+            fpout << props[i].S_l << " "; // Assuming S_l is stored in props
+        }fpout<<endl;
+        // New: Vapor Saturation (S_v)
+        fpout << "SCALARS S_v double" << endl;
+        fpout << "LOOKUP_TABLE default" << endl;
+        for (int i = 0; i < props.size(); i++) 
+        {
+            fpout << props[i].S_v << " "; // Assuming S_v is stored in props
+        } fpout<<endl;
+        // New: Halite Saturation (S_h)
+        fpout << "SCALARS S_h double" << endl;
+        fpout << "LOOKUP_TABLE default" << endl;
+        for (int i = 0; i < props.size(); i++) 
+        {
+            fpout << props[i].S_h << " "; // Assuming S_h is stored in props
         }fpout<<endl;
         fpout.close();
     }
+
     template <typename T>
     T cH2ONaCl:: max(vector<T> data)
     {
